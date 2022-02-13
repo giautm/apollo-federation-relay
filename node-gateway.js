@@ -7,14 +7,25 @@ const { gql } = require('apollo-server');
 const { parse, visit, graphqlSync } = require('graphql');
 const { buildSubgraphSchema } = require('@apollo/federation');
 
-const GraphQLNode = require('./graphql-node');
-
 const NODE_SERVICE_NAME = 'NODE_SERVICE';
+const DIVIDER_TOKEN = '_';
 
-const isNode = node =>
+const isNode = (node) =>
   node.interfaces.some(({ name }) => name.value === 'Node');
 
-const toTypeDefs = name =>
+const directivePULID = (node) => {
+  const directive = node.directives.find((d) => d.name.value === 'pulid');
+  if (directive) {
+    const arg = directive.arguments.find(
+      (arg) => arg.name.value === 'prefix',
+    );
+    return arg.value.value;
+  }
+
+  return null;
+};
+
+const toTypeDefs = (name) =>
   gql`
     extend type ${name} implements Node @key(fields: "id") {
       id: ID! @external
@@ -27,26 +38,53 @@ const toTypeDefs = name =>
  */
 class RootModule {
   /**
-   * @param {Set<string>} nodeTypes Supported typenames
+   * @param {Map<string, string>} nodeTypes Supported typenames
    */
   constructor(nodeTypes) {
+    const parsePrefix = (id) => {
+      const [prefix] = id.split(DIVIDER_TOKEN, 2);
+      return prefix;
+    };
+
+    const validateID = (id) => {
+      const prefix = parsePrefix(id);
+      if (!nodeTypes.has(prefix)) {
+        throw new Error(`Invalid node ID "${id}"`);
+      }
+
+      return { id };
+    };
+
     this.resolvers = {
+      Node: {
+        __resolveType({ id }) {
+          const prefix = parsePrefix(id);
+          return nodeTypes.get(prefix);
+        },
+      },
       Query: {
         node(_, { id }) {
-          const [typename] = GraphQLNode.fromId(id);
-          if (!nodeTypes.has(typename)) {
-            throw new Error(`Invalid node ID "${id}"`);
-          }
-
-          return { id };
+          return validateID(id);
+        },
+        nodes(_, { ids }) {
+          return ids.map(validateID);
         },
       },
     };
   }
 
   typeDefs = gql`
+    """
+    An object with an ID.
+    Follows the [Relay Global Object Identification Specification](https://relay.dev/graphql/objectidentification.htm)
+    """
+    interface Node {
+      id: ID!
+    }
+
     type Query {
       node(id: ID!): Node
+      nodes(ids: [ID!]!): [Node]!
     }
   `;
 }
@@ -57,7 +95,7 @@ class NodeCompose extends IntrospectAndCompose {
     // types that implement the Node interface. These must also become concrete
     // types in the Node service, so we build a GraphQL module for each.
     const modules = [];
-    const seenNodeTypes = new Set();
+    const seenNodeTypes = new Map();
 
     for (const subgraph of subgraphs) {
       // Manipulate the typeDefs of the service
@@ -81,7 +119,17 @@ class NodeCompose extends IntrospectAndCompose {
             // We don't need any resolvers for these modules; they're just
             // simple objects with a single `id` property.
             modules.push({ typeDefs: toTypeDefs(name) });
-            seenNodeTypes.add(name);
+
+            const prefix = directivePULID(node);
+            if (prefix) {
+              seenNodeTypes.set(prefix, name);
+
+              console.log(
+                `Added ${name} to Node service with prefix ${prefix}`,
+              );
+            } else {
+              throw new Error(`Node type ${name} is missing a pulid directive`);
+            }
 
             return;
           }
@@ -100,7 +148,6 @@ class NodeCompose extends IntrospectAndCompose {
     this.nodeSchema = buildSubgraphSchema([
       // The Node service must include the Node interface and a module for
       // translating the IDs into concrete types
-      GraphQLNode,
       new RootModule(seenNodeTypes),
 
       // The Node service must also have concrete types for each type. This
@@ -111,15 +158,20 @@ class NodeCompose extends IntrospectAndCompose {
     // This is a local schema, but we treat it as if it were a remote schema,
     // because all other schemas are (probably) remote. In that case, we need
     // to provide the Federated SDL as part of the type definitions.
-    const typeDefs = parse(graphqlSync({
-      schema: this.nodeSchema,
-      source: 'query { _service { sdl } }',
-    }).data._service.sdl);
+    const typeDefs = parse(
+      graphqlSync({
+        schema: this.nodeSchema,
+        source: 'query { _service { sdl } }',
+      }).data._service.sdl,
+    );
 
-    return super.createSupergraphFromSubgraphList([...subgraphs, {
-      name: NODE_SERVICE_NAME,
-      typeDefs,
-    }]);
+    return super.createSupergraphFromSubgraphList([
+      ...subgraphs,
+      {
+        name: NODE_SERVICE_NAME,
+        typeDefs,
+      },
+    ]);
   }
 
   createNodeDataSource() {
@@ -137,8 +189,11 @@ class NodeGateway extends ApolloGateway {
    * created without complaining about missing a URL.
    */
   createDataSource(serviceDef) {
-    const { supergraphSdl } = this.config
-    if (serviceDef.name === NODE_SERVICE_NAME && supergraphSdl instanceof NodeCompose) {
+    const { supergraphSdl } = this.config;
+    if (
+      serviceDef.name === NODE_SERVICE_NAME &&
+      supergraphSdl instanceof NodeCompose
+    ) {
       return supergraphSdl.createNodeDataSource();
     }
     return super.createDataSource(serviceDef);
