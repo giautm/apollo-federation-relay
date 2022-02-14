@@ -1,17 +1,13 @@
-/**
- * Gateway server and main entrypoint
- */
-const { ApolloServer } = require('apollo-server');
-
-const { NodeGateway, NodeCompose } = require('./node-gateway');
 const { server: serverProduct } = require('./server-product');
 const { server: serverReview } = require('./server-review');
+const { server: serverRelayNode } = require('./server-relay-node');
 
 const BASE_PORT = 8000;
 
 const SERVERS = [
   { name: '📦 product', server: serverProduct },
   { name: '🆒 review', server: serverReview },
+  { name: 'Relay Node', server: serverRelayNode },
 ];
 
 async function startServers() {
@@ -27,15 +23,7 @@ async function startServers() {
 }
 
 async function main() {
-  const subgraphs = await startServers();
-  const gateway = new NodeGateway({
-    supergraphSdl: new NodeCompose({ subgraphs }),
-    serviceHealthCheck: true,
-  });
-  const server = new ApolloServer({ gateway, subscriptions: false });
-  const info = await server.listen(BASE_PORT);
-
-  console.log(`\n--\n\n🌍 gateway up at ${info.url}graphql`);
+  await startServers();
 }
 
 main().catch(err => {

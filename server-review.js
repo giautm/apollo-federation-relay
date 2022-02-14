@@ -36,7 +36,6 @@ const REVIEWS_MAP = toRecords(REVIEWS);
 
 const typeDefs = gql`
   type Query {
-    node(id: ID!): Node
     review(id: ID!): Review
     reviews(ids: [ID!]): [Review]
   }

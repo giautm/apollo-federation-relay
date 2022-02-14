@@ -1,0 +1,103 @@
+schema
+  @core(feature: "https://specs.apollo.dev/core/v0.2"),
+  @core(feature: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @core(as: String, feature: String!, for: core__Purpose) repeatable on SCHEMA
+
+directive @join__field(graph: join__Graph, provides: join__FieldSet, requires: join__FieldSet) on FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__owner(graph: join__Graph!) on INTERFACE | OBJECT
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on INTERFACE | OBJECT
+
+"""
+An object with an ID.
+Follows the [Relay Global Object Identification Specification](https://relay.dev/graphql/objectidentification.htm)
+"""
+interface Node {
+  id: ID!
+}
+
+type PageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+}
+
+type Product implements Node
+  @join__owner(graph: PRODUCTS)
+  @join__type(graph: PRODUCTS, key: "id")
+  @join__type(graph: RELAY_NODE, key: "id")
+  @join__type(graph: REVIEWS, key: "id")
+{
+  id: ID! @join__field(graph: PRODUCTS)
+  name: String! @join__field(graph: PRODUCTS)
+  related(after: String, before: String, first: Int, last: Int): ProductConnection @join__field(graph: PRODUCTS)
+  reviews(after: String, before: String, first: Int, last: Int): ReviewConnection @join__field(graph: REVIEWS)
+}
+
+type ProductConnection {
+  edges: [ProductEdge]
+  pageInfo: PageInfo!
+}
+
+type ProductEdge {
+  cursor: String!
+  node: Product
+}
+
+type Query {
+  node(id: ID!): Node @join__field(graph: RELAY_NODE)
+  nodes(ids: [ID!]!): [Node]! @join__field(graph: RELAY_NODE)
+  product(id: ID!): Product @join__field(graph: PRODUCTS)
+  products(ids: [ID!]): [Product] @join__field(graph: PRODUCTS)
+  review(id: ID!): Review @join__field(graph: REVIEWS)
+  reviews(ids: [ID!]): [Review] @join__field(graph: REVIEWS)
+}
+
+type Review implements Node
+  @join__owner(graph: REVIEWS)
+  @join__type(graph: REVIEWS, key: "id")
+  @join__type(graph: RELAY_NODE, key: "id")
+{
+  body: String! @join__field(graph: REVIEWS)
+  id: ID! @join__field(graph: REVIEWS)
+  node: Node @join__field(graph: REVIEWS)
+  rating: Int @join__field(graph: REVIEWS)
+}
+
+type ReviewConnection {
+  edges: [ReviewEdge]
+  pageInfo: PageInfo!
+}
+
+type ReviewEdge {
+  cursor: String!
+  node: Review
+}
+
+enum core__Purpose {
+  """
+  `EXECUTION` features provide metadata necessary to for operation execution.
+  """
+  EXECUTION
+
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  PRODUCTS @join__graph(name: "products" url: "http://localhost:8001/graphql")
+  RELAY_NODE @join__graph(name: "relay_node" url: "http://localhost:8003/graphql")
+  REVIEWS @join__graph(name: "reviews" url: "http://localhost:8002/graphql")
+}

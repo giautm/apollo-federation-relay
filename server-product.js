@@ -33,7 +33,6 @@ const PRODUCTS_MAP = toRecords(PRODUCTS);
 
 const typeDefs = gql`
   type Query {
-    node(id: ID!): Node
     product(id: ID!): Product
     products(ids: [ID!]): [Product]
   }
